@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.0/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"> </script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"> </script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+
+</head><body>
+<table>
+<tr id="liveVid" style="display:none"><td colspan="3"><img id="ShowImage" src="" style="display:none"/>
+<canvas id="canvas" width="0" height="0"></canvas>
+<button id="btnSnapshot" style="display:none" onclick="fnSnapshot(1)">拍照</button></td></tr>
+<tr id="liveShot" style="display:none"><td colspan="3"><img id="SnapshotImage" src=""/>
+<button onclick="fnSnapshot(0)">關閉</button></td></tr>
+<tr>
+  <td colspan="3" nowrap="nowrap"><button id="restart">重啟</button> 
+  <button id="getStill" style="display:none">啟動AI辨識</button></td> 
+</tr>
+<tr>
+ <td>辨識種類</td> 
+ <td colspan="2">
+   <select id="object" onchange="fnReczObject()">
+     <option value="coco-ssd">物件辨識</option>
+     <option value="HandGesture">手勢辨識</option>
+   </select>
+   <span id="count" style="color:red"></span>
+ </td>
+</tr>
+<tr>
+ <td>物件偵測<br>提示</td>
+ <td colspan=2>
+ <div style="max-height:100px;overflow:scroll;"><div id="cbxObjectList" onClick="fnSelObject()">
+ <input type="checkbox" name="ObjRecz" value="person" checked><label>person</label><br></div></div>
+</td>
+</tr>
+<tr>
+ <td colspan=3><label>LINE通知</label><br><input type="text" id="LineToken" placeholder="access token"></td>
+</tr>
+<tr><td colspan=2>手勢算數<br>3 + ? =</td>
+ <td><input type="checkbox" id="doHandMath" value="1" checked onClick="HanddMathEnable()"></td>
+</tr>
+<tr><td colspan="3"><div id="result" style="color:red"></div><br></td></tr>
+<tr>
+ <td>ScoreLimit</td> 
+ <td colspan="2">
+    <select id="score">
+      <option value=1.0>1</option>
+      <option value=0.9>0.9</option>
+      <option value=0.8>0.8</option>
+      <option value=0.7>0.7</option>
+      <option value=0.6>0.6</option>
+      <option value=0.5 selected="selected">0.5</option>
+      <option value=0.4>0.4</option>
+      <option value=0.3>0.3</option>
+      <option value=0.2>0.2</option>
+      <option value=0.1>0.1</option>
+      <option value=0>0</option>
+    </select>
+ </td>
+</tr>
+<tr>
+  <td>MirrorImage</td> 
+  <td colspan="2">  
+    <select id="mirrorimage">
+      <option value="1">yes</option>
+      <option value="0">no</option>
+    </select>
+  </td>
+</tr>     
+<tr>
+  <td>Resolution</td> 
+  <td colspan="2">
+    <select id="framesize">
+      <option value="UXGA">UXGA(1600x1200)</option>
+      <option value="SXGA">SXGA(1280x1024)</option>
+      <option value="XGA">XGA(1024x768)</option>
+      <option value="SVGA">SVGA(800x600)</option>
+      <option value="VGA" selected="selected">VGA(640x480)</option>
+      <option value="CIF">CIF(400x296)</option>
+      <option value="QVGA">QVGA(320x240)</option>
+      <option value="HQVGA">HQVGA(240x176)</option>
+      <option value="QQVGA">QQVGA(160x120)</option>
+    </select> 
+  </td>
+</tr>    
+<tr>
+  <td>Flash</td>
+  <td colspan="2"><input type="range" id="flash" min="0" max="255" value="0"></td>
+</tr>
+<tr>
+  <td>Quality</td>
+  <td colspan="2"><input type="range" id="quality" min="10" max="63" value="10"></td>
+</tr>
+<tr>
+  <td>Brightness</td>
+  <td colspan="2"><input type="range" id="brightness" min="-2" max="2" value="0"></td>
+</tr>
+<tr>
+  <td>Contrast</td>
+  <td colspan="2"><input type="range" id="contrast" min="-2" max="2" value="0"></td>
+</tr>
+</table>
+</body></html> 
+
+<script>
+var getStill = document.getElementById('getStill');
+var ShowImage = document.getElementById('ShowImage');
+var btnSnapshot = document.getElementById('btnSnapshot');
+var canvas = document.getElementById("canvas");
+var context = canvas.getContext("2d"); 
+var object = document.getElementById('object');
+var score = document.getElementById("score");
+var mirrorimage = document.getElementById("mirrorimage");
+var count = document.getElementById('count'); 
+var result = document.getElementById('result');
+var flash = document.getElementById('flash'); 
+var LineToken = document.getElementById('LineToken');
+var lastValue="";
+var myTimer;
+var restartCount=0;
+var Model;
+var ModelHandDetector = null;
+var HandGesture = 0;
+var HandGestureSnapTime = 0;
+var HandGestureRunning = 0;
+var SelectedItems = null;
+var doSnapshot = 0;
+var doHandMathChecked = 0;
+var LineNtfTS = 0;
+  
+getStill.onclick = function (event) {
+  clearInterval(myTimer);
+  if(!ShowImage.width) btnSnapshot.style.display=""
+  myTimer = setInterval(function(){error_handle();},10000);    
+  ShowImage.src=location.origin+'/?getstill='+Math.random();
+}
+function error_handle() {
+  restartCount++;
+  clearInterval(myTimer);
+  if (restartCount<=2) {
+    result.innerHTML = "Get still error. <br>Restart ESP32-CAM "+restartCount+" times.";
+    myTimer = setInterval(function(){getStill.click();},8000);
+    console.log("error_handle")
+  }
+  else
+    result.innerHTML = "Get still error. <br>Please close the page and check ESP32-CAM.";
+}
+ShowImage.onload = function (event) {
+    clearInterval(myTimer);
+    restartCount=0;
+    canvas.setAttribute("width", ShowImage.width);
+    canvas.setAttribute("height", ShowImage.height);
+    if (mirrorimage.value==1) {
+      context.translate((canvas.width + ShowImage.width) / 2, 0);
+      context.scale(-1, 1);
+      context.drawImage(ShowImage, 0, 0, ShowImage.width, ShowImage.height);
+      context.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    else {
+      context.drawImage(ShowImage,0,0,ShowImage.width,ShowImage.height);
+    }
+
+    if(doSnapshot > 0) {
+      let tgtImg = document.getElementById('SnapshotImage');
+      let dataURL = canvas.toDataURL('image/png');
+      tgtImg.src = dataURL;
+      --doSnapshot;
+    }
+
+    if (Model) {
+      DetectImage();
+    }
+}
+function fnSnapshot(act) {
+    if(act == 1) {
+      doSnapshot++;
+      document.getElementById('liveShot').style.display="";
+    }
+    else if(act == 0) {
+      doSnapshot = 0;
+      document.getElementById('liveShot').style.display="none";
+    } 
+}
+function fnReczObject() {
+    count.innerHTML='';
+    if(object.value == 'HandGesture') {
+      if(!ModelHandDetector) {
+        result.innerHTML = "手部模型載入中請稍後...";
+        let model = handPoseDetection.SupportedModels.MediaPipeHands;
+        let detectorConfig = {
+          runtime: 'mediapipe',
+          maxHands: 1,
+          modelType: 'lite',
+          solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands'
+        };
+        handPoseDetection.createDetector(model, detectorConfig).then(dt => {
+          ModelHandDetector = dt;
+          result.innerHTML = "";
+          HandGesture = 1;
+        })
+      }
+      else {
+        HandGesture = 1;
+      }
+    }
+    else {
+      HandGesture = 0; 
+    }
+}
+restart.onclick = function (event) {
+  fetch(location.origin+'/?restart=stop');
+}    
+framesize.onclick = function (event) {
+  fetch(document.location.origin+'/?framesize='+this.value+';stop');
+}  
+flash.onchange = function (event) {
+  fetch(location.origin+'/?flash='+this.value+';stop');
+} 
+quality.onclick = function (event) {
+  fetch(document.location.origin+'/?quality='+this.value+';stop');
+} 
+brightness.onclick = function (event) {
+  fetch(document.location.origin+'/?brightness='+this.value+';stop');
+} 
+contrast.onclick = function (event) {
+  fetch(document.location.origin+'/?contrast='+this.value+';stop');
+}                              
+function ObjectDetect() {
+  result.innerHTML = "AI模型載入中請稍後...";
+  cocoSsd.load().then(cocoSsd_Model => {
+    Model = cocoSsd_Model;
+    result.innerHTML = "";
+    getStill.style.display = "inline-block";
+    document.getElementById('liveVid').style.display = "";
+  }); 
+}
+
+function DetectImage() {
+    if(HandGesture == 1) {
+      return DetectHandPose();
+    }
+
+    Model.detect(canvas).then(Predictions => {    
+      var s = (canvas.width>canvas.height)?canvas.width:canvas.height;
+      var objectCount=0;
+      let objLst={}, lineMsg="";
+      //console.log('Predictions: ', Predictions);
+      if (Predictions.length>0) {
+        result.innerHTML = "";
+        for (var i=0;i<Predictions.length;i++) {
+          const x = Predictions[i].bbox[0];
+          const y = Predictions[i].bbox[1];
+          const width = Predictions[i].bbox[2];
+          const height = Predictions[i].bbox[3];
+          context.lineWidth = Math.round(s/200);
+          context.strokeStyle = "#00FFFF";
+          context.beginPath();
+          context.rect(x, y, width, height);
+          context.stroke(); 
+          context.lineWidth = "2";
+          context.fillStyle = "red";
+          context.font = Math.round(s/30) + "px Arial";
+          context.fillText(Predictions[i].class, x, y);
+          //context.fillText(i, x, y);
+          result.innerHTML+= "["+i+"] "+Predictions[i].class+", "+Math.round(Predictions[i].score*100)+"%, "+Math.round(x)+", "+Math.round(y)+", "+Math.round(width)+", "+Math.round(height)+"<br>";
+          lineMsg += `\r\n[${i}] ${Predictions[i].class} ${Math.round(Predictions[i].score*100)}%`;
+          if(SelectedItems) {
+            let objnam = Predictions[i].class;
+            let dtIdx = SelectedItems.indexOf(objnam);
+            //console.log("DET: ", objnam, dtIdx, Predictions[i].score >= score.value);
+            if(dtIdx >= 0 && Predictions[i].score >= score.value) {
+              if( !objLst[objnam] ) {
+                objLst[objnam] = 1;
+                toast_notify(`偵測到:　${objnam}`);
+              }
+              else {
+                objLst[objnam]++;
+              }
+              objectCount++;
+            }
+          }
+        }
+        count.innerHTML = objectCount;
+      }
+      else {
+        result.innerHTML = "無辨識物件";
+        count.innerHTML = "0";
+      }
+  
+      if (result.innerHTML != lastValue ) { 
+        lastValue = result.innerHTML;
+        if (objectCount > 0) {
+          let curMs = Date.now();
+          if(curMs - LineNtfTS >= 30000 && LineToken.value.length > 10) {
+            line_notify(2, LineToken.value, `${lineMsg}`);
+            LineNtfTS = Date.now();
+          }
+          //$.ajax({url: document.location.origin+'/?serial='+object.value+';stop', async: false});
+          //$.ajax({url: document.location.origin+'/?detectCount='+object.value+';'+String(objectCount)+';stop', async: false});
+        }
+      }
+      try {
+        document.createEvent("TouchEvent");
+        setTimeout(function(){getStill.click();},250);
+      }
+      catch(e) {
+        setTimeout(function(){getStill.click();},150);
+      } 
+    });
+}
+function DetectHandPose() {
+  if(!ModelHandDetector) {
+    result.innerHTML = "手部模型載入錯誤!";
+    return;
+  }
+  if(HandGestureRunning > 0) {
+    result.innerHTML = "手部辨識過載";
+    return;
+  }
+  HandGestureRunning = 1;
+  const estimationConfig = {flipHorizontal: false};
+  ModelHandDetector.estimateHands(canvas, estimationConfig).then((hands) => {
+    //console.log("HandPose:", hands);
+    if(!hands || hands.length == 0) {
+      result.innerHTML = "";
+      return;
+    }
+    result.innerHTML = "";
+    let handedness, gestures;
+    for(let h=0; h<hands.length; h++) {
+      gestures = "";
+      handedness = hands[h].handedness == "Right"?"右手":"左手";
+      let fingers_angle = hand_angle(hands[h].keypoints);
+      if(fingers_angle && fingers_angle.length == 5) {
+        gestures = hand_pos(fingers_angle); 
+       //console.log("gestures:", gestures);
+      }
+      result.innerHTML += `[${h}] ${handedness},${Math.round(hands[h].score*100)}% 手勢: ${gestures}<br>`
+      if(gestures.length > 0) {
+        let nowT=parseInt(Date.now()/1000);
+        if(nowT-HandGestureSnapTime > 4 && gestures == '2') {
+          fnSnapshot(1);
+          HandGestureSnapTime=nowT;
+        }
+        context.fillStyle = "white";
+        context.font = "40px Arial";
+        let cxtText = gestures;  
+        if(doHandMathChecked > 0) {
+          let num = parseInt(gestures);
+          if( num > 0 ) {
+            cxtText = `3 +    = ${3+num}`;
+          }
+        }
+        context.fillText(cxtText, 20, canvas.height/2-40);
+      }
+    }
+  }).catch(e =>{
+    console.log(e);
+    result.innerHTML = "HandPose Detection Error";
+  }).finally(()=>{
+    HandGestureRunning = 0;
+    setTimeout(function(){getStill.click();},150);
+  });
+}
+
+function HanddMathEnable() {
+  let doHandMath = document.getElementById('doHandMath');
+  doHandMathChecked = doHandMath.checked ? 1:0;  
+}
+
+function vector_2d_angle(v1, v2) {
+  let v1_x = v1[0];
+  let v1_y = v1[1];
+  let v2_x = v2[0];
+  let v2_y = v2[1];
+  let angle_, angle_degrees;
+  try {
+    angle_ = Math.acos((v1_x*v2_x + v1_y*v2_y) / (Math.sqrt(v1_x**2 + v1_y**2) * Math.sqrt(v2_x**2 + v2_y**2)));
+    angle_degrees = (180/Math.PI) * angle_;
+  } catch (error) {
+    angle_degrees = 180;
+  }
+  return angle_degrees;
+}
+
+function hand_angle(hand_) {
+  let angle_list = [];
+  //thumb
+  let angle_ = vector_2d_angle(
+    [hand_[0].x - hand_[2].x, hand_[0].y - hand_[2].y],
+    [hand_[3].x - hand_[4].x, hand_[3].y - hand_[4].y]);
+  angle_list.push(angle_);
+  //index
+  angle_ = vector_2d_angle(
+    [hand_[0].x - hand_[6].x, hand_[0].y - hand_[6].y],
+    [hand_[7].x - hand_[8].x, hand_[7].y - hand_[8].y]);
+  angle_list.push(angle_);
+  //middle
+  angle_ = vector_2d_angle(
+    [hand_[0].x - hand_[10].x, hand_[0].y - hand_[10].y],
+    [hand_[11].x - hand_[12].x, hand_[11].y - hand_[12].y]);
+  angle_list.push(angle_);
+  //ring
+  angle_ = vector_2d_angle(
+    [hand_[0].x - hand_[14].x, hand_[0].y - hand_[14].y],
+    [hand_[15].x - hand_[16].x, hand_[15].y - hand_[16].y]);
+  angle_list.push(angle_);
+  //pink
+  angle_ = vector_2d_angle(
+    [hand_[0].x - hand_[18].x, hand_[0].y - hand_[18].y],
+    [hand_[19].x - hand_[20].x, hand_[19].y - hand_[20].y]);
+  angle_list.push(angle_);
+  return angle_list;
+}
+function hand_pos(finger_angle) {
+  let f1 = finger_angle[0];
+  let f2 = finger_angle[1];
+  let f3 = finger_angle[2];
+  let f4 = finger_angle[3];
+  let f5 = finger_angle[4];
+
+  if (f1 < 50 && f2 >= 50 && f3 >= 50 && f4 >= 50 && f5 >= 50) {
+    return 'good';
+  } else if (f1 >= 50 && f2 >= 50 && f3 < 50 && f4 >= 50 && f5 >= 50) {
+    return 'no!!!';
+  } else if (f1 < 50 && f2 < 50 && f3 >= 50 && f4 >= 50 && f5 < 50) {
+    return 'ROCK!';
+  } else if (f1 >= 50 && f2 >= 50 && f3 >= 50 && f4 >= 50 && f5 >= 50) {
+    return '0';
+  } else if (f1 >= 50 && f2 >= 50 && f3 >= 50 && f4 >= 50 && f5 < 50) {
+    return 'pink';
+  } else if (f1 >= 50 && f2 < 50 && f3 >= 50 && f4 >= 50 && f5 >= 50) {
+    return '1';
+  } else if (f1 >= 50 && f2 < 50 && f3 < 50 && f4 >= 50 && f5 >= 50) {
+    return '2';
+  } else if (f1 >= 50 && f2 >= 50 && f3 < 50 && f4 < 50 && f5 < 50) {
+    return 'ok';
+  } else if (f1 < 50 && f2 >= 50 && f3 < 50 && f4 < 50 && f5 < 50) {
+    return 'ok';
+  } else if (f1 >= 50 && f2 < 50 && f3 < 50 && f4 < 50 && f5 > 50) {
+    return '3';
+  } else if (f1 >= 50 && f2 < 50 && f3 < 50 && f4 < 50 && f5 < 50) {
+    return '4';
+  } else if (f1 < 50 && f2 < 50 && f3 < 50 && f4 < 50 && f5 < 50) {
+    return '5';
+  } else if (f1 < 50 && f2 >= 50 && f3 >= 50 && f4 >= 50 && f5 < 50) {
+    return '6';
+  } else if (f1 < 50 && f2 < 50 && f3 >= 50 && f4 >= 50 && f5 >= 50) {
+    return '7';
+  } else if (f1 < 50 && f2 < 50 && f3 < 50 && f4 >= 50 && f5 >= 50) {
+    return '8';
+  } else if (f1 < 50 && f2 < 50 && f3 < 50 && f4 < 50 && f5 >= 50) {
+    return '9';
+  } else {
+    return '';
+  }
+}
+
+function toast_notify(msg) {
+Toastify({
+  text: msg,
+  duration: 2000,
+  newWindow: true,
+  close: true,
+  gravity: "bottom",
+  position: "right",
+  style: {
+    "padding": "8px",
+    "border-radius": "8px",
+    "background": "linear-gradient(to right, #ff5f6d, #ffc371)"
+  },
+  onClick: function(){}
+}).showToast();
+}
+
+function line_notify(type, token, msg) {
+  let requrl=null;
+  msg = encodeURIComponent(msg)
+  if(type == 1)
+    requrl = document.location.origin + `/?linenotify=${token};${msg};stop`;
+  if(type == 2)
+    requrl = document.location.origin + `/?sendCapturedImageToLineNotify=${token};${msg};stop`;
+  if(requrl) {
+    $.ajax({type:"GET", url:requrl, async:false,
+      success: function(res){console.log(res)},
+      error: function(err){console.log("Err:", err)},
+    });  
+  } 
+}
+
+function getFeedback(target) {
+  let data = $.ajax({
+    type: "get",
+    dataType: "text",
+    url: target,
+    success: function(response) {
+      result.innerHTML = response;
+    },
+    error: function(exception) {
+      result.innerHTML = 'fail';
+    }
+  });
+}
+
+function obj_option_init() {
+  const cbxList = document.getElementById("cbxObjectList");
+  const objOptions = [
+    "airplane", "apple", "backpack", "banana", "baseball bat", "baseball glove", "bear", "bed", 
+    "bench", "bicycle", "bird", "boat", "book", "bottle", "bowl", "broccoli", "bus", "cake", "car", 
+    "carrot", "cat", "cell phone", "chair", "clock", "couch", "cow", "cup", "dining table", "dog", 
+    "donut", "elephant", "fire hydrant", "fork", "frisbee", "giraffe", "handbag", "hair drier", 
+    "horse", "hot dog", "keyboard", "kite", "knife", "laptop", "microwave", "motorcycle", "mouse", 
+    "orange", "oven", "parking meter", "potted plant", "pizza", "refrigerator", "remote", "sandwich", 
+    "scissors", "sheep", "sink", "skateboard", "skis", "snowboard", "spoon", "sports ball", "stop sign", 
+    "suitcase", "surfboard", "teddy bear", "tennis racket", "tie", "toaster", "toilet", "toothbrush", 
+    "traffic light", "train", "truck", "tv", "umbrella", "vase", "wallet", "wine glass", "zebra"]
+  const objDefualt = ["person","apple","bicycle","bottle","bus","cup","car","clock","carrot","cat",
+    "clock","cell phone","motorcycle","stop sign","traffic light", "train","truck","wine glass"]
+  
+  objOptions.forEach(obj => {
+    const cbx = document.createElement("input");
+    cbx.type = "checkbox";
+    cbx.name = "ObjRecz";
+    cbx.value = obj;
+    if(objDefualt.indexOf(obj) >= 0)
+      cbx.checked = true;
+    const label = document.createElement("label");
+    label.textContent = obj;
+    cbxList.appendChild(cbx);
+    cbxList.appendChild(label);
+    cbxList.appendChild(document.createElement("br"));
+  });
+}
+
+function getSelectedItems() {
+  let cbxList = document.querySelectorAll('input[name="ObjRecz"]:checked');
+  let selected = Array.from(cbxList).map(cbx => cbx.value);
+  return selected;
+}
+
+function fnSelObject() {
+  SelectedItems = getSelectedItems();
+  console.log("SelectedItems: ", SelectedItems);
+}
+
+window.onload = function () {
+  ObjectDetect();
+  object.value = 'coco-ssd';
+  obj_option_init();
+  fnSelObject();
+  HanddMathEnable();
+}    
+</script>   
+

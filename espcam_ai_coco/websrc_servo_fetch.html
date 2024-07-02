@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pan and Tilt Control</title>
+<style>
+.slider {
+  width: 80%;
+  margin: 10px auto;
+}
+</style>
+</head><body>
+<h2>Pan and Tilt Control</h2>
+<div class="slider">
+  <label for="panSlider">Pan:</label>
+  <input type="range" min="0" max="180" value="90" class="slider" id="panSlider">
+  <span id="panValue">90</span> degrees
+</div>
+
+<div class="slider">
+  <label for="tiltSlider">Tilt:</label>
+  <input type="range" min="0" max="180" value="90" class="slider" id="tiltSlider">
+  <span id="tiltValue">90</span> degrees
+</div>
+
+<div>
+  <h2>Output - GPIO 2</h2>
+  <p class="state">state: <span id="state">%STATE%</span></p>
+  <p><button id="btnToggle">Toggle</button></p>
+</div>
+</body>
+</html>
+
+<script>
+var panSlider = document.getElementById('panSlider');
+var tiltSlider = document.getElementById('tiltSlider');
+var panValue = document.getElementById('panValue');
+var tiltValue = document.getElementById('tiltValue');
+var panTimer,tiltTimer;
+
+panSlider.addEventListener('input', function() {
+  panValue.textContent = panSlider.value;
+  if(panTimer) clearTimeout(panTimer);
+  panTimer = setTimeout(()=>{
+   updatePan(panSlider.value);},
+   250);
+});
+
+tiltSlider.addEventListener('input', function() {
+  tiltValue.textContent = tiltSlider.value;
+  if(tiltTimer) clearTimeout(tiltTimer);
+  tiltTimer = setTimeout(()=> {
+    updateTilt(tiltSlider.value);},
+    250);      
+});
+
+function updatePan(value) {
+  console.log('Pan value updated to:', value);
+  fetch(`/servo?dir=pan;pos=${value}`).then(response => {
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+    return response.text(); //return response.json();
+  })
+  .then(data => {
+    console.log('Pan update successful:', data);
+  })
+  .catch(error => {
+    console.error('Error updating pan:', error);
+  });
+}
+
+function updateTilt(value) {
+  console.log('Tilt value updated to:', value);
+  fetch(`/servo?dir=tilt;pos=${value}`).then(response => {
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+    return response.text(); //return response.json();
+  })
+  .then(data => {
+    console.log('Pan update successful:', data);
+  })
+  .catch(error => {
+    console.error('Error updating pan:', error);
+  });
+}
+
+var gateway = `ws://${window.location.hostname}/ws`;
+var websocket;
+window.addEventListener('load', onLoad);
+function initWebSocket() {
+  console.log('Trying to open a WebSocket connection...');
+  websocket = new WebSocket(gateway);
+  websocket.onopen = wsOnOpen;
+  websocket.onclose = wsOnClose;
+  websocket.onmessage = wsOnMessage; // <-- add this line
+}
+function wsOnOpen(event) {
+  console.log('wsConn opened');
+}
+function wsOnClose(event) {
+  console.log('wsConn closed');
+  setTimeout(initWebSocket, 2000);
+}
+function wsOnMessage(event) {
+  let state;
+  if (event.data == "1"){
+    state = "ON";
+  }
+  else{
+    state = "OFF";
+  }
+  //document.getElementById('state').innerHTML = state;
+}
+function onLoad(event) {
+  initWebSocket();
+  initButton();
+}
+function initButton() {
+  document.getElementById('btnToggle').addEventListener('click', btnToggle);
+}
+function btnToggle(){
+  websocket.send('toggle');
+}  
+</script>
