@@ -23,6 +23,6 @@ const char* password = "00000";
 
 另外, 用手機做WiFi掃瞄會看到類似 192.168.4.1_esp32_group3 的SSID, 表示目前ESP32沒有連上Wi-Fi
 
-正常連上會顯示已取得的ip位址, 如下圖中的 192.168.10.2
+正常連上會顯示已取得的ip位址, 如下圖中的 192.168.10.2_esp32_group
 
  ![服用方法](https://github.com/Kafkakav/uavstudy/blob/main/esp32cam_flow.png "服用方法")
