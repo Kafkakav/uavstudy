@@ -7,7 +7,7 @@
 
 ## espcam_ai_coco 目錄
 ### 為ESP32 CAM + Tensorflow.js 的AI影像辨認應用
-透過 html/js 方式來呈現Tensorflwo 預設模組的應用
+透過 html/js 執行Tensorflow.js的AI辨識模組 - coco 和 mediapip hand pose
 
 用Arduino + ESP32 board(AI Thinker) 編譯/燒錄前請先修改無線網路設定
 
