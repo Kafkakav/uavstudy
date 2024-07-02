@@ -8,16 +8,9 @@
 #define ENABLE_SERVO 1
 #define ENABLE_LITTLEFS__ 1
 
-#if 1
-//const char* ssid = "KS_";
-//const char* password = "00000";
 const char* ssid = "KSW";
 const char* password = "00000";
-#else
-const char* ssid = "abcdefg";
-const char* password = "112255667788";
-#define MYCAMERA_NEWCONF 1
-#endif
+//#define MYCAMERA_NEWCONF 1
 
 const char* apssid = "esp32_group3";
 const char* appassword = "ggyy123456789";  
