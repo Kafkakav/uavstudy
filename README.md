@@ -13,7 +13,7 @@
 
 主程式: espcam_ai_coco.ino, 以下二行改成自用的WLAN設定
 > 最好的測試方法是用手機熱點分享的方式，否則可能二台WLAN裝置之間會因為安全性問題無法溝通
-> [可參考Google Chromecast 電視棒的解釋] ([https://www.google.com](https://support.google.com/chromecast/answer/3213084?hl=zh-HK)) 
+>  ([可參考Google Chromecast 電視棒的解釋](https://support.google.com/chromecast/answer/3213084?hl=zh-HK)) 
 
 ``` javascript
 const char* ssid = "KSW";
@@ -28,7 +28,9 @@ const char* password = "00000";
  ![服用方法](https://github.com/Kafkakav/uavstudy/blob/main/esp32cam_flow.png "服用方法")
 
  ![WEBUI](https://github.com/Kafkakav/uavstudy/blob/main/esp32cam_webui.png "WEBUI")
-  
+ 
+ ([投影片 PPT](https://docs.google.com/presentation/d/1Xz3vYSYVf30odHnMy84Z2SsUoAR702CkyJI7dnKj5WY))
+
 ## Future Works
 1. add a webui for WLAN ssid/password settings. Dont rewrite the firmware when we need to change WLAN settings every time 
 2. support a small filesystem (spiffs/littlefs) to store some settings
