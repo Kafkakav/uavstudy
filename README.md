@@ -32,4 +32,4 @@ const char* password = "00000";
 ## Future Works
 1. add a webui for WLAN ssid/password settings. Dont rewrite the firmware when we need to change WLAN settings every time 
 2. support a small filesystem (spiffs/littlefs) to store some settings
-3. fix some bug
+3. fix some bugs
