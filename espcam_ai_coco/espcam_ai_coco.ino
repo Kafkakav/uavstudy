@@ -8,21 +8,24 @@
 #define ENABLE_SERVO 1
 #define ENABLE_LITTLEFS__ 1
 
-const char* ssid = "KSW";
-const char* password = "00000";
+const char* ssid = "mySSID";
+const char* password = "myPasswd";
 //#define MYCAMERA_NEWCONF 1
 
-const char* apssid = "esp32_group3";
+const char* apssid = "esp32GG";
 const char* appassword = "ggyy123456789";  
 
 String Feedback="";   
  
 String Command="",cmd="",P1="",P2="",P3="",P4="",P5="",P6="",P7="",P8="",P9="";
- 
+
 byte ReceiveState=0,cmdState=1,strState=1,questionstate=0,equalstate=0,semicolonstate=0;
  
 int conter; 
- 
+short int idxHtmlWLAN = 0;
+short int alwaysHtmlWLAN = 0;
+int doEspRestart = 0;
+
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -96,15 +99,15 @@ void setup_servo() {
   servo2.attach(SERVO_2, 1000, 2000);
 
   Serial.println("Servo_1 testing...");
-  for(int p=5; p<170; p++) {
+  for(int p=5; p<180; p+=10) {
     servo1.write(p);
-    delay(20);
+    delay(50);
   }
   servo1.write(servo1Pos);
   Serial.println("Servo_2 testing...");
-  for(int p=5; p<170; p++) {
+  for(int p=5; p<180; p+=10) {
     servo2.write(p);
-    delay(20);
+    delay(50);
   }
   servo2.write(servo2Pos);
   
@@ -119,7 +122,7 @@ String urldecode(String str);
 void setup_fs();
 void set_wifi_config(const char*ssid, const char *key); 
 const char *get_wifi_config(const char*kname, const char *defval);
-void save_config();
+void save_config(int type);
 #endif
 
 void setup() {
@@ -230,12 +233,17 @@ void setup() {
     }
   }
   else {
-    WiFi.softAP((WiFi.softAPIP().toString()+"_"+(String)apssid).c_str(), appassword);         
-    for (int i=0;i<2;i++) {    
+    alwaysHtmlWLAN = 1;
+    WiFi.softAP((WiFi.softAPIP().toString()+"_"+(String)apssid).c_str(), appassword);
+    Serial.print("SoftAP: ");
+    Serial.println((WiFi.softAPIP().toString()+"_"+(String)apssid).c_str());
+
+    ledcWrite(LED_LEDC_CHANNEL,0);
+    for (int i=0;i<2;i++) {
+      delay(1000);
       ledcWrite(LED_LEDC_CHANNEL,10);
       delay(1000);
       ledcWrite(LED_LEDC_CHANNEL,0);
-      delay(1000);    
     }
   }     
 
@@ -814,12 +822,10 @@ window.onload = function () {
 
 static const char PROGMEM INDEX_HTML_WLAN[] = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Configure WLAN SSID and Password</title>
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 <style>
 body { font-family: Arial, sans-serif; margin: 20px; }
 label { display: block; margin-bottom: 10px; }
@@ -845,26 +851,42 @@ button:hover { background-color: #45a049; }
 </head>
 <body>
 <h2>Configure WLAN SSID and Password</h2>
-<form>
+<div>
   <label for="ssid">WLAN SSID:</label>
   <input type="text" id="ssid" required>
-  <label for="password">WLAN Password:</label>
-  <input type="text" id="password" required>
-  <button onClick="wlanconf()">Apply</button>
-</form>
+  <label for="wlankey">WLAN Password:</label>
+  <input type="text" id="wlankey" required>
+  <button onClick="btnWlan()">Apply</button>
+  <button onClick="btnReset()">Clear Settings</button>
+</div>
 <script>
-function wlanconf (event) {
+function btnWlan() {
   let inpSSID = document.getElementById('ssid');
-  let inpKey = document.getElementById('password');
+  let inpKey = document.getElementById('wlankey');
   let requrl = document.location.origin;
-
   requrl += `/?resetwifi=${encodeURIComponent(inpSSID.value)}`;
   requrl += `;${encodeURIComponent(inpKey.value)}`;
   requrl += `;stop`;
-  $.ajax({type:"GET", url:requrl, async:false,
-    success: function(res){console.log(res)},
-    error: function(err){console.log("Err:", err)},
-  });  
+  alert("WLAN setup and reboot");
+  http_fetch(requrl);
+}
+function btnReset() {
+  let requrl = document.location.origin + "/?fsfmt=1;stop";
+  alert("Clear settings then reboot.");
+  http_fetch(requrl);
+}
+function http_fetch(url, cb) {
+fetch(url).then(res => {
+  if (!res.ok) {
+    alert("Network no response");
+  }
+  if(cb) return cb(res.json())
+}).catch(error => {
+  console.log("Err:", err);
+  if(cb) return cb(null)
+});  
+  
+  
 }
 </script>
 </body></html>
@@ -874,124 +896,193 @@ function wlanconf (event) {
 //  return WiFi.localIP() == client()->localIP();
 //}
 
+void parseQSCmd(String inputString) {
+  int equalsPos = inputString.indexOf('=');
+  if (equalsPos != -1) {
+    // Extract cmd name
+    cmd = inputString.substring(0, equalsPos);
+    // Extract values substring (after '=')
+    String valuesStr = inputString.substring(equalsPos + 1);
+
+    // Split values by ';'
+    int index = 0;
+    int separatorPos = 0;
+    int paramIdx = 1;
+    while (index < valuesStr.length() && paramIdx < 9) {
+      separatorPos = valuesStr.indexOf(';', index);
+      if (separatorPos == -1) {
+        separatorPos = valuesStr.length(); // If no more ';' found, set to end of string
+      }
+      // Extract each value
+      String value = valuesStr.substring(index, separatorPos);
+      //P1~P9 is a suck to do this. reconstruction? hell no
+      switch(paramIdx) {
+        case 1: P1 = value;break;
+        case 2: P2 = value;break;
+        case 3: P3 = value;break;
+        case 4: P4 = value;break;
+        case 5: P5 = value;break;
+        case 6: P6 = value;break;
+        case 7: P7 = value;break;
+      }
+      paramIdx++;
+      // Move to the next value
+      index = separatorPos + 1;
+    }
+  }
+  else {
+    cmd = inputString;
+  }
+}
+
+unsigned long currentTime = millis();
+unsigned long previousTime = 0; 
+#define CLI_TIMEOUT 5000
+
 void loop() {
   Feedback="";Command="";cmd="";P1="";P2="";P3="";P4="";P5="";P6="";P7="";P8="";P9="";
   ReceiveState=0,cmdState=1,strState=1,questionstate=0,equalstate=0,semicolonstate=0;
   
   WiFiClient client = server.available();
-
-  if (client) { 
-    String currentLine = "";
- 
-    while (client.connected()) {
-      if (client.available()) {
-        char c = client.read();             
-        
-        getCommand(c);   
-                
-        if (c == '\n') { // one lineEnd read   
-          if (currentLine.length() == 0) {
-            
-            if (cmd=="getstill") {
-             
-              camera_fb_t * fb = NULL;
-              fb = esp_camera_fb_get();  
-              if(!fb) {
-                Serial.println("Camera capture failed");
-                delay(1000);
-                ESP.restart();
-              }
+  if(!client) {
+    delay(10);
+    return;
+  }
   
-              client.println("HTTP/1.1 200 OK");
-              client.println("Access-Control-Allow-Origin: *");              
-              client.println("Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept");
-              client.println("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
-              client.println("Content-Type: image/jpeg");
-              client.println("Content-Disposition: form-data; name=\"imageFile\"; filename=\"picture.jpg\""); 
-              client.println("Content-Length: " + String(fb->len));             
-              client.println("Connection: close");
-              client.println();
-              
-              uint8_t *fbBuf = fb->buf;
-              size_t fbLen = fb->len;
-              for (size_t n=0;n<fbLen;n=n+1024) {
-                if (n+1024<fbLen) {
-                  client.write(fbBuf, 1024);
-                  fbBuf += 1024;
-                }
-                else if (fbLen%1024>0) {
-                  size_t remainder = fbLen%1024;
-                  client.write(fbBuf, remainder);
-                }
-              }  
-              
-              esp_camera_fb_return(fb);
+  if (client) {
+    currentTime = millis();
+    previousTime = currentTime;
 
-              //FIXME why?
-              //pinMode(4, OUTPUT);
-              //digitalWrite(4, LOW);               
-            }
-            else {
-              client.println("HTTP/1.1 200 OK");
-              client.println("Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept");
-              client.println("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
-              client.println("Content-Type: text/html; charset=utf-8");
-              client.println("Access-Control-Allow-Origin: *");
-              if (cmd == "wlanpage")
-                client.println("Content-Length: " + String(strlen(INDEX_HTML_WLAN))); 
-              client.println("Connection: close");
-              client.println();
-
-              String Data="";
-              int Index;
-              if (cmd != "")
-                Data = Feedback;
-              else {
-                if (cmd == "wlanpage")
-                  Data = String((const char *)INDEX_HTML_WLAN);
-                else
-                  Data = String((const char *)INDEX_HTML);
-              }
-              
-              for (Index = 0; Index < Data.length(); Index = Index+1000) {
-                client.print(Data.substring(Index, Index+1000));
-              }           
-              client.println();
-            }
-                        
-            Feedback="";
-            break;
-          } 
-          else {
-            currentLine = "";
-          }
-        } 
-        else if (c != '\r') {
-          currentLine += c;
-        }
+    char rchr;
+    String header = "", qstring = "", Data;
+    int cSt, cEd, Index;
  
-        if ((currentLine.indexOf("/?")!=-1)&&(currentLine.indexOf(" HTTP")!=-1)) {
-          if (Command.indexOf("stop")!=-1) {   http://192.168.xxx.xxx/?cmd=aaa;bbb;ccc;stop
-            client.println();
-            client.println();
-            Serial.println("client.stop_1");
-            client.stop();
-          }
-          currentLine="";
-          Feedback="";
-          ExecuteCommand();
-          Serial.println("ExecmdEnd");
+    //read 1st line of HTTP
+    while (client.connected() && currentTime - previousTime <= CLI_TIMEOUT && header.length() < 256) {
+      currentTime = millis();
+      if ( client.available() ) {
+        rchr = client.read();
+        header += rchr;
+        if (rchr == '\n') { 
+          break;
         }
-      } //Endof_client.available()
-    } //Endof_while_client.connected()
+      }
+      else {
+        delay(20);  
+      }
+    }
+    cSt = header.indexOf(" ") + 1; // GET or POST
+    cEd = header.indexOf(" HTTP/");
+    Serial.print("hdr_1st="); Serial.println(header);
+    if(cEd < 0) {
+      Serial.println("HTTP 1st error");
+      client.flush();
+      client.stop();
+      return;
+    }
+    header = header.substring(cSt, cEd);
+    cSt = header.indexOf("?");
+    if(cSt > 0) {
+      qstring = header.substring(cSt+1);
+    }
+    header = header.substring(0, cSt);
+    Serial.print("url="); Serial.println(header);
+    Serial.print("qstr="); Serial.println(qstring);
+    parseQSCmd(qstring); //P1~P9
+
+    if (cmd == "getstill") {
+      camera_fb_t * fb = NULL;
+      fb = esp_camera_fb_get();  
+      if(!fb) {
+        Serial.println("Camera capture failed");
+        delay(1000);
+        ESP.restart();
+      }
     
-    delay(5);
-    Serial.println("client.stop_2");
+      client.println("HTTP/1.1 200 OK");
+      client.println("Access-Control-Allow-Origin: *");              
+      client.println("Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept");
+      client.println("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
+      client.println("Content-Type: image/jpeg");
+      client.println("Content-Disposition: form-data; name=\"imageFile\"; filename=\"picture.jpg\""); 
+      client.println("Content-Length: " + String(fb->len));             
+      client.println("Connection: close");
+      client.println();
+      
+      uint8_t *fbBuf = fb->buf;
+      size_t fbLen = fb->len;
+      for (size_t n=0;n<fbLen;n=n+1024) {
+        if (n+1024<fbLen) {
+          client.write(fbBuf, 1024);
+          fbBuf += 1024;
+        }
+        else if (fbLen%1024>0) {
+          size_t remainder = fbLen%1024;
+          client.write(fbBuf, remainder);
+        }
+      }  
+      esp_camera_fb_return(fb);
+    }
+    else if(cmd != "") { //qsCMD
+      ExecuteCommand();
+      client.println("HTTP/1.1 200 OK");
+      client.println("Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept");
+      client.println("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
+      client.println("Content-Type: text/html; charset=utf-8");
+      client.println("Access-Control-Allow-Origin: *");
+      client.println("Connection: close");
+      client.println();
+      
+      String Data=Feedback;
+      for (Index = 0; Index < Data.length(); Index = Index+1000) {
+        client.print(Data.substring(Index, Index+1000));
+      }           
+      client.println();        
+      Feedback="";
+      Serial.println("ExecmdEnd");
+    }
+    else { // webpages
+      if( header.indexOf("favicon.ico") >= 0) {
+        client.println("HTTP/1.1 404 Not Found");
+        client.flush();
+        client.stop();
+        return;
+      }
+ 
+      client.println("HTTP/1.1 200 OK");
+      client.println("Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept");
+      client.println("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
+      client.println("Content-Type: text/html; charset=utf-8");
+      client.println("Access-Control-Allow-Origin: *");
+      //if (idxHtmlWLAN == 1)
+      //  client.println("Content-Length: " + String(strlen(INDEX_HTML_WLAN))); 
+      client.println("Connection: close");
+      client.println();
+
+      if( header.indexOf("wlanpage") >= 0)
+        idxHtmlWLAN = 1;
+ 
+      if (alwaysHtmlWLAN == 1 || idxHtmlWLAN == 1)
+        Data = String((const char *)INDEX_HTML_WLAN);
+      else
+        Data = String((const char *)INDEX_HTML);
+ 
+      for (Index = 0; Index < Data.length(); Index = Index+1000) {
+        client.print(Data.substring(Index, Index+1000));
+      }           
+      client.println();
+    }
+    client.flush();
     client.stop();
+    
+    Serial.println("client.end");
+    if( doEspRestart == 1) {
+       doEspRestart = 0;
+       delay(100);
+       ESP.restart();
+    }
   }
-  else {
-    delay(10);  
-  }
+  
 }
 
 //format 192.168.x.x/?cmd=p1;p2;p3;p4;
@@ -1273,14 +1364,23 @@ void ExecuteCommand()
 {
   //Serial.println("");
   //Serial.println("Command: "+Command);
-  if (cmd!="getstill") {
+  if (cmd!="getstill" || cmd!="wlanpage") {
     Serial.println("cmd= "+cmd+" ,P1= "+P1+" ,P2= "+P2+" ,P3= "+P3+" ,P4= "+P4+" ,P5= "+P5+" ,P6= "+P6+" ,P7= "+P7+" ,P8= "+P8+" ,P9= "+P9);
     Serial.println("");
+  }
+  else {
+    Feedback=Command;
+    return;
   }
   
   if (cmd=="your cmd") {
     // You can do anything.
     // Feedback="<font color=\"red\">Hello World</font>";
+  }
+  else if (cmd=="fsfmt") {
+    save_config(911);
+    delay(100);
+    doEspRestart = 1;
   }
   else if (cmd=="ip") {
     Feedback="AP IP: "+WiFi.softAPIP().toString();    
@@ -1290,9 +1390,12 @@ void ExecuteCommand()
   else if (cmd=="mac") {
     Feedback="STA MAC: "+WiFi.macAddress();
   }  
-  else if (cmd=="resetwifi") {  
+  else if (cmd=="resetwifi") {
+    P1 = urldecode(P1);
+    P2 = urldecode(P2);
+      
     WiFi.begin(P1.c_str(), P2.c_str());
-    Serial.print("Connecting to ");
+    Serial.print("WLAN Connecting to ");
     Serial.println(P1);
     long int StartTime = 5000 + millis();
     while (WiFi.status() != WL_CONNECTED) {
@@ -1302,14 +1405,17 @@ void ExecuteCommand()
     Serial.println("");
     Serial.println("STAIP: "+WiFi.localIP().toString());
     Feedback="STAIP: "+WiFi.localIP().toString();
-#if ENABLE_LITTLEFS__
+
     if(WiFi.status() == WL_CONNECTED ) {
+      #if ENABLE_LITTLEFS__
       set_wifi_config(P1.c_str(), P2.c_str());
-      save_config();
+      save_config(9);
       delay(100);
-      ESP.restart();
+      #endif
     }
-#endif
+    //have to reset because app.ssid is messed
+    doEspRestart = 1;
+
   }
   else if (cmd=="restart") {
     ESP.restart();
@@ -1439,6 +1545,7 @@ void ExecuteCommand()
   }
   else {
     Feedback="Command is not defined.";
+    Serial.print("cmd not found: "); Serial.println(cmd);
   }
   
   if (Feedback=="") Feedback=Command;  
@@ -1476,7 +1583,6 @@ unsigned char h2int(char c)
 
 String urldecode(String str)
 {
-    
     String encodedString="";
     char c;
     char code0;
